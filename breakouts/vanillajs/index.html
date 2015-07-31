@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style type="text/css">
+    html, body {
+      height: 100%;
+      padding: 0;
+      margin: 0;
+      background: black;
+    }
+
+    #gameField {
+      display: block;
+      width: 320;
+      height: 320;
+      margin: auto;
+      background: black;
+      position: absolute;
+      top:0;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      cursor: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas width="320" height="416" id="gameField"></canvas>
+  <script src="inputManager.js"></script>
+  <script src="imageManager.js"></script>
+  <script src="gameStateInit.js"></script>
+  <script src="gameStateGame.js"></script>
+  <script src="gameStateMenu.js"></script>
+  <script src="gameStateWin.js"></script>
+  <script src="gameStateGameover.js"></script>
+  <script src="physics.js"></script>
+  <script src="breakout.js"></script>
+</body>
+</html>
