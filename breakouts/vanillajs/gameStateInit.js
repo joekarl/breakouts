@@ -12,7 +12,7 @@ GameState_INIT = {
 
     if (stateData.doneLoading) {
       // if done loading assets, change current state to menu
-      gameState.currentState = GameState_GAME;
+      gameState.currentState = GameState_MENU;
     } else if (!stateData.startedLoading) {
 
       // if we haven't started loading, start loading all the assets

@@ -1,3 +1,6 @@
+
+// how many times to run sim per frame
+const SIM_FACTOR = 4.0;
 const PADDLE_IMAGE_COORDS = {
   sx: 0,
   sy: 64,
@@ -8,6 +11,7 @@ const PADDLE_V_OFFSET = 376;
 const BALL_DIAMETER = 16;
 const BALL_RADIUS = BALL_DIAMETER / 2;
 const PADDLE_BOUNDS = [PADDLE_IMAGE_COORDS.sWidth, PADDLE_IMAGE_COORDS.sHeight];
+const PADDLE_COLLISION_AUGMENT = 5;
 const BALL_IMAGE_COORDS = [
   {sx: 48, sy: 64},
   {sx: 64, sy: 64},
@@ -28,31 +32,53 @@ const COUNTER_IMAGE_COORDS = [
 const COUNTER_IMAGE_POS = [140, 200];
 const WALL_SIZE = 16;
 const REVERSE_THRESHOLD = 64;
+const BLOCK_X_OFFSET = 48;
+const BLOCK_Y_OFFSET = 48;
+const BLOCK_WIDTH = 32;
+const BLOCK_HEIGHT = 16;
+const BLOCK_ANIMATION_DURATION = 250;
+const BLOCK_ANIMATION_FRAME_NUM = 4;
+const BLOCK_ANIMATION_FRAME_DURATION = BLOCK_ANIMATION_DURATION / BLOCK_ANIMATION_FRAME_NUM;
+const SCORE_PER_BLOCK = 100;
+
 const DEBUG_PHYSICS = false;
 
-function Block(position) {
+/**
+ * position - [x, y]
+ * color - see values in levels.js
+ */
+function Block(position, color) {
   this.position = position;
-  this.aabb = {x: 0, y: 0, width: 0, height: 0};
+  this.aabb = {
+    x: position[0],
+    y: position[1],
+    width: BLOCK_WIDTH,
+    height: BLOCK_HEIGHT
+  };
   this.dead = false;
-  this.deathTimeout = 1000;
+  this.deathTimeout = BLOCK_ANIMATION_DURATION;
+  this.color = color;
+}
+
+function countLiveBlocks(blocks) {
+  return blocks.reduce(function(count, block) {
+    if (!block.dead) {
+      return count + 1;
+    } else {
+      return count;
+    }
+  }, 0);
 }
 
 function update(gameState, dt) {
   // check finish conditions before doing anything else
   const stateData = gameState.stateData;
 
-  if (stateData.levelBlocks.length == 0) {
-    //gameState.level++;
-  }
+  const liveBlockCount = countLiveBlocks(stateData.levelBlocks);
 
-  if (stateData.level == stateData.winLevel) {
-    return gameState.currentState = GameState_WIN;
-  }
-
-  if (stateData.levelStartTimeout > 0) {
-    // do nothing but update counter
-    stateData.levelStartTimeout -= dt;
-    return;
+  if (liveBlockCount == 0) {
+    stateData.level++;
+    return initStartState(gameState, dt);
   }
 
   // get updated input
@@ -70,6 +96,12 @@ function update(gameState, dt) {
   stateData.paddleAABB.width = PADDLE_BOUNDS[0];
   stateData.paddleAABB.height = PADDLE_BOUNDS[1];
 
+  if (stateData.levelStartTimeout > 0) {
+    // don't update ball or collisions
+    stateData.levelStartTimeout -= dt;
+    return;
+  }
+
   // update ball animation
   stateData.ballAnimationCounter += dt;
   const ballAnimationOffset = stateData.ballAnimationCounter % BALL_ANIMATION_DURATION;
@@ -83,7 +115,9 @@ function update(gameState, dt) {
 
   // update block lifecycles
   stateData.levelBlocks.forEach(function(block){
-
+    if (block.dead && block.deathTimeout > 0) {
+      block.deathTimeout -= dt;
+    }
   });
 
   // do simulation
@@ -115,15 +149,72 @@ function update(gameState, dt) {
   stateData.ballAABB.width = BALL_DIAMETER;
   stateData.ballAABB.height = BALL_DIAMETER;
 
-  const paddleCollision = PHYSICS.satAABBToAABBCollision(stateData.paddleAABB, stateData.ballAABB);
+  const paddleCollision = PHYSICS.satAABBToAABBCollision(stateData.ballAABB, stateData.paddleAABB);
   if (paddleCollision && stateData.ballVelocity[1] > 0) {
     stateData.ballVelocity[1] *= -1;
     if (paddleCollision[0] != 0) {
-      stateData.ballVelocity[0] *= -1;
+      // collision with side of paddle
+      if ((stateData.ballVelocity[0] < 0 && paddleCollision[0] < 0) ||
+          (stateData.ballVelocity[0] > 0 && paddleCollision[0] > 0)) {
+        // ball moving left, collision on left side of paddle
+        // -- or --
+        // ball moving right, collision on right side of paddle
+        // ignore side collision
+      } else {
+        // collision with side of paddle, flip x velocity
+        stateData.ballVelocity[0] *= -1;
+      }
+    } else {
+      // we hit the top of the paddle, let's augment the ball's horizontal velocity
+      // this is so we get a little better gameplay and can kindof control the ball
+      const collisionDistance = Math.abs(stateData.ballPosition[0] - stateData.paddlePosition);
+      if (stateData.ballPosition[0] < stateData.paddlePosition) {
+        stateData.ballVelocity[0] -= collisionDistance * PADDLE_COLLISION_AUGMENT;
+      } else if (stateData.ballPosition[0] > stateData.paddlePosition) {
+        stateData.ballVelocity[0] += collisionDistance * PADDLE_COLLISION_AUGMENT;
+      }
     }
   }
 
   // check if collision with tiles
+  const tileCollisions = stateData.levelBlocks.map(function(block){
+    if (block.dead) { return; }
+    const collisionVector = PHYSICS.satAABBToAABBCollision(stateData.ballAABB, block.aabb);
+    if (collisionVector) {
+      return {
+        block: block,
+        collisionVector: collisionVector
+      };
+    } else {
+      return;
+    }
+  });
+
+  const blockCollision = tileCollisions.reduce(function(prev, curr){
+    if (!prev && curr) {
+      return curr;
+    } else if (prev && curr){
+      const prevMagnitude = PHYSICS.magnitudeOfVector(prev.collisionVector);
+      const currMagnitude = PHYSICS.magnitudeOfVector(curr.collisionVector);
+      if (currMagnitude > prevMagnitude) {
+        return curr;
+      }
+    } else {
+      return prev;
+    }
+  }, undefined);
+
+  if (blockCollision) {
+    blockCollision.block.dead = true;
+    stateData.score += SCORE_PER_BLOCK;
+    if (blockCollision.collisionVector[0] != 0) {
+      // collision with side of block
+      stateData.ballVelocity[0] *= -1;
+    } else if (blockCollision.collisionVector[1] != 0) {
+      // collision with side of block
+      stateData.ballVelocity[1] *= -1;
+    }
+  }
 }
 
 function render(gameState, dt) {
@@ -154,9 +245,9 @@ function render(gameState, dt) {
 
   // draw labels
   ctx.fillStyle = "#000000";
-  ctx.font = '20px sans-serif';
+  ctx.font = '18px sans-serif';
   ctx.fillText("Lives: " + stateData.lives, 30, gameState.canvasSize.height - 10);
-  ctx.fillText("Score: " + stateData.score, 120, gameState.canvasSize.height - 10);
+  ctx.fillText("Score: " + stateData.score, 115, gameState.canvasSize.height - 10);
   ctx.fillText("Level: " + stateData.level, 220, gameState.canvasSize.height - 10);
 
   ctx.drawImage(tiles,
@@ -169,8 +260,19 @@ function render(gameState, dt) {
     BALL_DIAMETER,
     BALL_DIAMETER);
 
+  // draw blocks
   stateData.levelBlocks.forEach(function(block){
-
+    if (block.dead && block.deathTimeout <= 0) { return; }
+    const animationFrame = BLOCK_ANIMATION_FRAME_NUM - Math.floor(block.deathTimeout / BLOCK_ANIMATION_FRAME_DURATION);
+    ctx.drawImage(tiles,
+      BLOCK_WIDTH * animationFrame,
+      BLOCK_HEIGHT * block.color,
+      BLOCK_WIDTH,
+      BLOCK_HEIGHT,
+      block.aabb.x,
+      block.aabb.y,
+      block.aabb.width,
+      block.aabb.height);
   });
 
   if (stateData.levelStartTimeout > 0) {
@@ -192,11 +294,23 @@ function render(gameState, dt) {
     ctx.strokeStyle = "#FF0000";
     ctx.strokeRect(stateData.paddleAABB.x, stateData.paddleAABB.y, stateData.paddleAABB.width, stateData.paddleAABB.height);
     ctx.strokeRect(stateData.ballAABB.x, stateData.ballAABB.y, stateData.ballAABB.width, stateData.ballAABB.height);
+
+    stateData.levelBlocks.forEach(function(block){
+      if (!block.dead) {
+        ctx.strokeRect(block.aabb.x, block.aabb.y, block.aabb.width, block.aabb.height);
+      }
+    });
   }
 }
 
 function initStartState(gameState, dt) {
   const stateData = gameState.stateData;
+  var i, j;
+
+  if (stateData.level > stateData.winLevel) {
+    return gameState.currentState = GameState_WIN;
+  }
+
   stateData.levelStartTimeout = 2999;
   stateData.paddlePosition = gameState.canvasSize.width / 2;
   gameState.inputManager.mousePosition[0] = stateData.paddlePosition;
@@ -225,13 +339,24 @@ function initStartState(gameState, dt) {
   stateData.ballAABB.y = stateData.ballPosition[1] - BALL_RADIUS;
   stateData.ballAABB.width = BALL_DIAMETER;
   stateData.ballAABB.height = BALL_DIAMETER;
-}
 
-function pointInAABB(point, aabb) {
-  return (point[0] < aabb.x + aabb.width &&
-      point[0] > aabb.x &&
-      point[1] < aabb.y + aabb.height &&
-      point[1] > aabb.y);
+  // setup blocks
+  if (countLiveBlocks(stateData.levelBlocks) == 0) {
+    stateData.levelBlocks = [];
+    // load level blocks
+    var level = LEVELS[stateData.level - 1];
+    for (i = 0; i < level.length; ++i) {
+      var row = level[i];
+      for (j = 0; j < row.length; ++j) {
+        var blockColor = row[j];
+        var x = BLOCK_WIDTH * j + BLOCK_X_OFFSET;
+        var y = BLOCK_HEIGHT * i + BLOCK_Y_OFFSET;
+        if (blockColor !== undefined) {
+          stateData.levelBlocks.push(new Block([x, y], blockColor));
+        }
+      }
+    }
+  }
 }
 
 GameState_GAME = {
@@ -245,7 +370,11 @@ GameState_GAME = {
     initStartState(gameState, dt);
   },
   updateRender: function(gameState, dt) {
-    update(gameState, dt);
+    const simDt = dt / SIM_FACTOR;
+    var i;
+    for (i = 0; i < SIM_FACTOR; ++i) {
+      update(gameState, simDt);
+    }
     render(gameState, dt);
   }
 };

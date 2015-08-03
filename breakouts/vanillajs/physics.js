@@ -1,3 +1,8 @@
+
+/**
+ * This is why you don't write your own physics :/
+ */
+
 PHYSICS = (function(){
 
   /**
@@ -96,7 +101,15 @@ PHYSICS = (function(){
   }
 
   /**
+   * Return the center of point of an AABB
+   */
+  function centerOfAABB(aabb) {
+    return [aabb.width / 2.0 + aabb.x, aabb.height / 2.0 + aabb.y];
+  }
+
+  /**
    * returns undefined if no collision or a vec2 of Minimum Translation Vector
+   * the mtv will be the vector to move aabb1 away from aabb2
    * aabb - {x, y, width, height} - (x,y) being the lower left corner
    */
   function satAABBToAABBCollision(aabb1, aabb2) {
@@ -129,14 +142,34 @@ PHYSICS = (function(){
         return;
       }
     }
+
+    // TODO(karl): make this not suck
     mtv = [smallestOverlapAxis[0], smallestOverlapAxis[1]];
     mtv[0] *= smallestOverlap;
     mtv[1] *= smallestOverlap;
+    // apply direction vector to mtv
+    const aabb1Center = centerOfAABB(aabb1);
+    const aabb2Center = centerOfAABB(aabb2);
+    if (aabb1Center[0] < aabb2Center[0]) {
+      // aabb1 left of aabb2
+      mtv[0] = -1 * Math.abs(mtv[0]);
+    } else {
+      // aabb1 right of aabb2
+      mtv[0] = Math.abs(mtv[0]);
+    }
+    if (aabb1Center[1] < aabb2Center[1]) {
+      // aabb1 below aabb2
+      mtv[1] = -1 * Math.abs(mtv[1]);
+    } else {
+      // aabb1 above of aabb2
+      mtv[1] = Math.abs(mtv[1]);
+    }
     return mtv;
   }
 
   return {
-    satAABBToAABBCollision: satAABBToAABBCollision
+    satAABBToAABBCollision: satAABBToAABBCollision,
+    magnitudeOfVector: magnitudeOfVector
   };
 
 }());

@@ -28,6 +28,7 @@ function gameLoop(lastTime, currentTime) {
   if (dt > 32) {
     dt = 32;
   }
+  dt = 16;
   const ctx = gameState.ctx2d;
 
   // init the game state, clean up after old state
